@@ -39,7 +39,7 @@
     "bignumber.js": "^9.0.1",
     "bourbon": "^4.3.4",
     "bourbon-neat": "^2.0.0",
-    "browser-sync": "^2.18.2",
+    "browser-sync": "^2.27.8",
     "css-loader": "2.1.1",
     "dompurify": "^2.2.6",
     "dotenv": "^16.0.0",
