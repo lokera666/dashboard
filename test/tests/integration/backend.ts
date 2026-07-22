@@ -61,10 +61,10 @@ describe("integration", function () {
       chai
         .expect(body.programs.productAndInnovation)
         .to.match(DECIMAL_NUMBER_REGEX);
+      chai.expect(body.programs.growth).to.match(DECIMAL_NUMBER_REGEX);
       chai
-        .expect(body.programs.growth)
+        .expect(body.programs.assetsAndLiquidity)
         .to.match(DECIMAL_NUMBER_REGEX);
-      chai.expect(body.programs.assetsAndLiquidity).to.match(DECIMAL_NUMBER_REGEX);
     });
 
     it("/api/v2/lumens should return successfuly with data", async function () {
@@ -202,6 +202,92 @@ describe("integration", function () {
       chai.expect(body).to.be.a("string");
       chai.expect(body).to.not.equal("");
       chai.expect(body).to.match(DECIMAL_NUMBER_REGEX);
+    });
+
+    describe("rate limiting", function () {
+      // Rate limiters are skipped when DEV=true (how tests run), so toggle
+      // it off to exercise them.
+      let originalDev: string | undefined;
+
+      before(function () {
+        originalDev = process.env.DEV;
+        process.env.DEV = "false";
+      });
+
+      after(function () {
+        process.env.DEV = originalDev;
+      });
+
+      it("/api/lumens should have its own higher rate limit", async function () {
+        const { headers } = await request(app).get("/api/lumens").expect(200);
+
+        chai.expect(headers["ratelimit-limit"]).to.equal("1000");
+      });
+
+      it("other api endpoints should keep the general rate limit", async function () {
+        const { headers } = await request(app)
+          .get("/api/v2/lumens")
+          .expect(200);
+
+        chai.expect(headers["ratelimit-limit"]).to.equal("100");
+      });
+
+      it("path variants of GET /api/lumens should keep the higher limit", async function () {
+        const { headers } = await request(app).get("/api/lumens/").expect(200);
+
+        chai.expect(headers["ratelimit-limit"]).to.equal("1000");
+      });
+
+      it("non-GET requests to /api/lumens should stay rate limited", async function () {
+        const { headers } = await request(app).post("/api/lumens").expect(404);
+
+        chai.expect(headers["ratelimit-limit"]).to.equal("100");
+      });
+
+      // The limiters key on client IP, so spoofing X-Forwarded-For (trusted
+      // from loopback) gives each test a fresh, isolated budget.
+      it("general api traffic should not consume the /api/lumens budget", async function () {
+        const ip = "203.0.113.10";
+
+        // Exhaust the general API budget for this IP...
+        for (let i = 0; i < 100; i++) {
+          await request(app)
+            .get("/api/v2/lumens")
+            .set("X-Forwarded-For", ip)
+            .expect(200);
+        }
+        await request(app)
+          .get("/api/v2/lumens")
+          .set("X-Forwarded-For", ip)
+          .expect(429);
+
+        // ...and /api/lumens is still available, having only counted its own
+        // requests.
+        const { headers } = await request(app)
+          .get("/api/lumens")
+          .set("X-Forwarded-For", ip)
+          .expect(200);
+
+        chai.expect(headers["ratelimit-remaining"]).to.equal("999");
+      });
+
+      it("/api/lumens traffic should not consume the general api budget", async function () {
+        const ip = "203.0.113.20";
+
+        for (let i = 0; i < 5; i++) {
+          await request(app)
+            .get("/api/lumens")
+            .set("X-Forwarded-For", ip)
+            .expect(200);
+        }
+
+        const { headers } = await request(app)
+          .get("/api/v2/lumens")
+          .set("X-Forwarded-For", ip)
+          .expect(200);
+
+        chai.expect(headers["ratelimit-remaining"]).to.equal("99");
+      });
     });
 
     it("/api/ledgers/public should return successfully with data", async function () {
